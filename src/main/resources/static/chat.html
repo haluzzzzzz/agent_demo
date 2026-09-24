@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>SSE AI聊天-MVC+SseEmitter</title>
+</head>
+<body>
+<div>
+    <div id="chatBox" style="width:650px;height:450px;border:1px solid #ccc;padding:10px;overflow-y:auto;"></div>
+    <br/>
+    <textarea id="input" style="width:650px;height:80px;" placeholder="输入消息"></textarea>
+    <br/>
+    <button onclick="sendMessage()">发送</button>
+    <button onclick="stopGenerate()">停止生成</button>
+</div>
+
+<script>
+    // 同一个sessionId维持对话记忆
+    const chatId = "chat_001";
+    const chatBox = document.getElementById("chatBox");
+    const inputEl = document.getElementById("input");
+    let reader = null;
+
+    async function sendMessage() {
+        const message = inputEl.value.trim();
+        if (!message) return;
+        // 防止并发多次请求
+        if (reader) {
+            appendText("【正在生成，请等待完成或点击停止】");
+            return;
+        }
+
+        appendText("用户：" + message);
+        inputEl.value = "";
+
+        // AI输出dom容器
+        const aiDom = document.createElement("div");
+        aiDom.innerText = "AI：";
+        chatBox.appendChild(aiDom);
+
+        try {
+            const res = await fetch("/api/chat/stream", {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json"
+                },
+                body: JSON.stringify({
+                    sessionId: chatId,
+                    content: message
+                })
+            });
+
+            reader = res.body.getReader();
+            const decoder = new TextDecoder("utf-8");
+            let buffer = "";
+
+            while (true) {
+                const { done, value } = await reader.read();
+                if (done) {
+                    break;
+                }
+                // 把二进制转字符串，累积到buffer
+                buffer += decoder.decode(value, { stream: true });
+                // 按换行分割SSE行
+                const lines = buffer.split("\n");
+                // 剩下不完整的行留在buffer，下一轮继续解析
+                buffer = lines.pop();
+
+                for (const line of lines) {
+                    // 解析SSE data: 开头的行
+                    if (line.startsWith("data:")) {
+                        const token = line.substring(5);
+                        aiDom.innerText += token;
+                        chatBox.scrollTop = chatBox.scrollHeight;
+                    }
+                }
+            }
+        } catch (err) {
+            console.error("流异常", err);
+            appendText("\n【连接异常】");
+        } finally {
+            reader = null;
+        }
+    }
+
+    // 停止生成：浏览器断开流，后端Flux自动取消
+    function stopGenerate() {
+        if (reader) {
+            reader.cancel();
+            reader = null;
+            appendText("\n【已手动终止AI输出】");
+        }
+    }
+
+    function appendText(text) {
+        const div = document.createElement("div");
+        div.innerText = text;
+        chatBox.appendChild(div);
+        chatBox.scrollTop = chatBox.scrollHeight;
+    }
+</script>
+</body>
+</html>
