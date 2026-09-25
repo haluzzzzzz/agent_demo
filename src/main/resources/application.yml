@@ -1,8 +1,14 @@
 spring:
+  datasource:
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    username: root
+    password:
+    url: jdbc:mysql://localhost:3306/chat_agent?useSSL=false&serverTimezone=UTC
   ai:
     ollama:
       base-url: http://localhost:11434
       chat:
+        enable-thinking: true
         model: qwen3.5:9b
   chat:
     memory:
@@ -23,7 +29,13 @@ data:
     database: 0
     timeout: 10s
     connect-timeout: 10s
-
+mybatis-plus:
+  configuration:
+    map-underscore-to-camel-case: true
+    log-impl: org.apache.ibatis.logging.stdout.StdOutImpl # 打印SQL
+  global-config:
+    db-config:
+      id-type: assign_uuid
 server:
   port: 8080
   servlet:

@@ -2,227 +2,317 @@
 <html lang="zh-CN">
 <head>
     <meta charset="UTF-8">
-    <title>SSE AI聊天-MVC+SseEmitter</title>
-    <style>
-        .container {
-            display: flex;
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI助手</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdn.jsdelivr.net/npm/font-awesome@4.7.0/css/font-awesome.min.css" rel="stylesheet">
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        primary: '#2563eb',
+                        sidebarBg: '#111827',
+                        chatBg: '#ffffff',
+                        userMsg: '#eff6ff',
+                        aiMsg: '#f9fafb',
+                    },
+                    fontFamily: {
+                        sans: ['Inter', 'system-ui', 'sans-serif'],
+                    },
+                }
+            },
+            darkMode: 'class',
         }
-        .sidebar {
-            width: 220px;
-            border-right: 1px solid #ccc;
-            padding: 10px;
-            height: 480px;
-            overflow-y: auto;
-        }
-        .session-item {
-            padding: 6px;
-            cursor: pointer;
-            margin-bottom:4px;
-            border-radius:4px;
-        }
-        .session-item.active {
-            background-color: #e8e8e8;
-        }
-        .chat-main {
-            padding-left:10px;
+    </script>
+    <style type="text/tailwindcss">
+        @layer utilities {
+            .scrollbar-hide::-webkit-scrollbar {
+                display: none;
+            }
+            .scrollbar-hide {
+                -ms-overflow-style: none;
+                scrollbar-width: none;
+            }
+            .msg-enter {
+                animation: fadeIn 0.25s ease-out;
+            }
+            @keyframes fadeIn {
+                from {opacity:0; transform: translateY(6px);}
+                to {opacity:1; transform: translateY(0);}
+            }
         }
     </style>
 </head>
-<body>
-<div class="container">
-    <!-- 侧边会话栏 -->
-    <div class="sidebar">
-        <button onclick="createNewSession()" style="width:100%;padding:6px;margin-bottom:10px;">+ 新建会话</button>
-        <div id="sessionListBox"></div>
+<body class="h-screen overflow-hidden bg-gray-50 flex">
+<!-- 左侧侧边栏 -->
+<div id="sidebar" class="w-64 bg-sidebarBg text-white flex flex-col transition-all">
+    <div class="p-3">
+        <button id="newChatBtn" class="w-full py-2.5 px-4 rounded-lg border border-gray-600 hover:bg-gray-800 flex items-center gap-2 transition">
+            <i class="fa fa-plus-circle"></i>
+            <span>新建对话</span>
+        </button>
+    </div>
+    <!-- 会话列表 -->
+    <div id="sessionList" class="flex-1 overflow-y-auto scrollbar-hide px-2 py-1 space-y-1">
+        <!-- 会话项由JS动态渲染 -->
+    </div>
+    <div class="p-3 border-t border-gray-700 text-xs text-gray-400">
+        AI助手 · agent_chat
+    </div>
+</div>
+
+<!-- 主聊天区域 -->
+<div class="flex-1 flex flex-col h-full">
+    <!-- 顶部标题栏 -->
+    <div class="h-14 border-b flex items-center justify-between px-5 bg-white">
+        <div class="font-medium text-gray-800">AI对话</div>
+        <div id="currentSessionName" class="text-sm text-gray-500"></div>
     </div>
 
-    <!-- 聊天主区域（原有代码原样保留） -->
-    <div class="chat-main">
-        <div id="chatBox" style="width:650px;height:450px;border:1px solid #ccc;padding:10px;overflow-y:auto;"></div>
-        <br/>
-        <textarea id="input" style="width:650px;height:80px;" placeholder="输入消息"></textarea>
-        <br/>
-        <button onclick="sendMessage()">发送</button>
-        <button onclick="stopGenerate()">停止生成</button>
+    <!-- 聊天内容容器 -->
+    <div id="chatContainer" class="flex-1 overflow-y-auto p-4 md:px-20 lg:px-32 space-y-6">
+        <div class="w-full h-full flex items-center justify-center text-gray-400" id="emptyTip">
+            <div class="text-center">
+                <div class="text-3xl mb-3">🤖</div>
+                <p>你好，我是你的AI助手，请输入问题开始对话</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- 底部输入区域 -->
+    <div class="p-4 md:px-20 lg:px-32 border-t bg-white">
+        <div class="relative">
+                <textarea id="msgInput"
+                          class="w-full border border-gray-200 rounded-xl p-3 pr-20 resize-none outline-none focus:border-primary transition"
+                          rows="2"
+                          placeholder="输入消息，Shift+Enter换行"></textarea>
+            <div class="absolute right-2 bottom-2 flex gap-1">
+                <button id="stopBtn" class="hidden px-3 py-1.5 rounded-lg bg-gray-200 hover:bg-gray-300 text-sm">
+                    <i class="fa fa-stop"></i> 停止
+                </button>
+                <button id="sendBtn" class="px-3 py-1.5 rounded-lg bg-primary hover:bg-blue-700 text-white text-sm">
+                    <i class="fa fa-paper-plane"></i> 发送
+                </button>
+            </div>
+        </div>
     </div>
 </div>
 
 <script>
+    // =========全局变量=========
     let currentSessionId = null;
+    let abortController = null; // 用于中断流式请求
     let sessionList = [];
-    const chatBox = document.getElementById("chatBox");
-    const inputEl = document.getElementById("input");
-    let reader = null;
+    const API_BASE = "http://localhost:8080/api/chat";
 
-    // 页面加载：读取本地存储会话列表
-    window.onload = function(){
-        const saved = localStorage.getItem("sessionList");
-        if(saved){
-            sessionList = JSON.parse(saved);
-        }
-        if(sessionList.length === 0){
-            // 没有会话，自动新建第一个
-            createNewSession();
+    // DOM元素
+    const chatContainer = document.getElementById('chatContainer');
+    const msgInput = document.getElementById('msgInput');
+    const sendBtn = document.getElementById('sendBtn');
+    const stopBtn = document.getElementById('stopBtn');
+    const newChatBtn = document.getElementById('newChatBtn');
+    const sessionListDom = document.getElementById('sessionList');
+    const emptyTip = document.getElementById('emptyTip');
+
+    // 初始化
+    async function init(){
+        // 页面加载，从后端拉取全部会话
+        await loadAllSessions();
+        const lastSessionId = localStorage.getItem("ai_chat_current_session");
+        if(lastSessionId && sessionList.includes(lastSessionId)){
+            await switchSession(lastSessionId);
         }else{
-            // 读取上次激活会话
-            const lastId = localStorage.getItem("activeSessionId");
-            if(lastId && sessionList.find(s=>s.id === lastId)){
-                switchSession(lastId);
-            }else{
-                switchSession(sessionList[0].id);
+            createNewSession();
+        }
+
+        newChatBtn.onclick = createNewSession;
+        sendBtn.onclick = sendMessage;
+        stopBtn.onclick = stopGenerate;
+        msgInput.addEventListener('keydown', (e)=>{
+            if(e.key === 'Enter' && !e.shiftKey){
+                e.preventDefault();
+                sendMessage();
             }
-        }
-        renderSessionList();
-    }
-
-    // 生成UUID
-    function genUUID(){
-        return crypto.randomUUID();
-    }
-
-    // 新建会话
-    function createNewSession(){
-        const newId = genUUID();
-        sessionList.push({
-            id: newId,
-            title: "新对话"
-        });
-        saveSessionToLocal();
-        switchSession(newId);
-        renderSessionList();
-    }
-
-    // 切换会话
-    async function switchSession(sessionId){
-        currentSessionId = sessionId;
-        localStorage.setItem("activeSessionId", sessionId);
-        // 清空聊天面板
-        chatBox.innerHTML = "";
-        // 请求后端接口加载历史消息
-        await loadHistoryMsg(sessionId);
-        renderSessionList();
-    }
-
-    // 从后端加载会话历史
-    async function loadHistoryMsg(sessionId){
-        try {
-            const resp = await fetch(`/api/chat/history?sessionId=${sessionId}`);
-            const history = await resp.json();
-            history.forEach(item=>{
-                appendText(`${item.role}：${item.content}`);
-            })
-        }catch(e){
-            console.warn("加载历史对话失败", e);
-        }
-    }
-
-    // 渲染侧边会话列表
-    function renderSessionList(){
-        const box = document.getElementById("sessionListBox");
-        box.innerHTML = "";
-        sessionList.forEach(item=>{
-            const div = document.createElement("div");
-            div.className = "session-item" + (item.id === currentSessionId ? " active" : "");
-            div.innerText = item.title;
-            div.onclick = ()=> switchSession(item.id);
-            box.appendChild(div);
         })
     }
 
-    // 保存会话列表到localStorage
-    function saveSessionToLocal(){
-        localStorage.setItem("sessionList", JSON.stringify(sessionList));
+    // 从后端拉取全部会话列表
+    async function loadAllSessions(){
+        const res = await fetch(`${API_BASE}/sessions`);
+        sessionList = await res.json();
+        renderSessionList();
     }
 
-    // ========== 下面是你原有 sendMessage / stopGenerate / appendText，只修改chatId为currentSessionId ==========
-    async function sendMessage() {
-        const message = inputEl.value.trim();
-        if (!message) return;
-        if (!currentSessionId){
-            appendText("【请先新建会话】");
-            return;
-        }
-        // 防止并发多次请求
-        if (reader) {
-            appendText("【正在生成，请等待完成或点击停止】");
-            return;
-        }
+    // 创建新会话
+    async function createNewSession(){
+        const sid = crypto.randomUUID();
+        currentSessionId = sid;
+        localStorage.setItem("ai_chat_current_session", sid);
 
-        appendText("用户：" + message);
-        inputEl.value = "";
+        // ✅【关键1】前端数组追加新会话
+        sessionList.push(sid);
 
-        // AI输出dom容器
-        const aiDom = document.createElement("div");
-        aiDom.innerText = "AI：";
-        chatBox.appendChild(aiDom);
+        // ✅【关键2】通知后端创建会话（后端把sid存入内存）
+        await fetch(`${API_BASE}/createSession`, {
+            method:"POST",
+            headers:{"Content-Type":"application/json"},
+            body: JSON.stringify({sessionId: sid})
+        });
+
+        clearChatDom();
+        emptyTip.style.display = "flex";
+        renderSessionList(); // 现在sessionList里面已经有sid，可以渲染出来
+    }
+
+
+    // 渲染左侧会话列表
+    function renderSessionList(){
+        sessionListDom.innerHTML = "";
+        sessionList.forEach(sid=>{
+            const item = document.createElement('div');
+            item.className = `flex items-center justify-between px-2 py-1.5 rounded cursor-pointer group ${sid === currentSessionId ? 'bg-gray-700' : 'hover:bg-gray-800'}`;
+            item.innerHTML = `
+                <span class="text-sm truncate flex-1" title="${sid}">对话-${sid.substring(0,8)}</span>
+                <button class="text-gray-400 hover:text-red-400 opacity-0 group-hover:opacity-100 transition" onclick="event.stopPropagation(); deleteSession('${sid}')">
+                    <i class="fa fa-trash-o"></i>
+                </button>
+            `;
+            item.onclick = ()=> switchSession(sid);
+            sessionListDom.appendChild(item);
+        })
+    }
+
+    // 切换会话
+    async function switchSession(sid){
+        currentSessionId = sid;
+        localStorage.setItem("ai_chat_current_session", sid);
+        renderSessionList();
+        clearChatDom();
+        emptyTip.style.display = "none";
+        const res = await fetch(`${API_BASE}/history?sessionId=${sid}`);
+        const history = await res.json();
+        history.forEach(item=>{
+            appendMessage(item.role, item.content);
+        })
+    }
+
+    // 删除会话
+    async function deleteSession(sid){
+        if(!confirm("确定删除该对话？")) return;
+        await fetch(`${API_BASE}/history?sessionId=${sid}`, {
+            method:"DELETE"
+        })
+        await loadAllSessions();
+        if(currentSessionId === sid){
+            createNewSession();
+        }
+    }
+
+    async function sendMessage(){
+        const content = msgInput.value.trim();
+        if(!content || abortController) return;
+        msgInput.value = "";
+        emptyTip.style.display = "none";
+
+        appendMessage("USER", content);
+        const aiWrapper = appendMessage("ASSISTANT", "", true);
+        const aiContentDom = aiWrapper.querySelector(".msg-content");
+
+        sendBtn.classList.add('hidden');
+        stopBtn.classList.remove('hidden');
+        abortController = new AbortController();
 
         try {
-            const res = await fetch("/api/chat/stream", {
-                method: "POST",
-                headers: {
-                    "Content-Type": "application/json"
+            const resp = await fetch(`${API_BASE}/stream`, {
+                method:"POST",
+                headers:{
+                    "Content-Type":"application/json"
                 },
                 body: JSON.stringify({
                     sessionId: currentSessionId,
-                    content: message
-                })
+                    content: content
+                }),
+                signal: abortController.signal
             });
-
-            reader = res.body.getReader();
-            const decoder = new TextDecoder("utf-8");
+            const reader = resp.body.getReader();
+            const decoder = new TextDecoder();
             let buffer = "";
+            let fullText = "";
 
-            while (true) {
-                const { done, value } = await reader.read();
-                if (done) {
-                    break;
-                }
-                // 把二进制转字符串，累积到buffer
-                buffer += decoder.decode(value, { stream: true });
-                // 按换行分割SSE行
-                const lines = buffer.split("\n");
-                // 剩下不完整的行留在buffer，下一轮继续解析
-                buffer = lines.pop();
+            while(true){
+                const {done, value} = await reader.read();
+                if(done) break;
+                buffer += decoder.decode(value, {stream:true});
+                const eventBlocks = buffer.split("\n\n");
+                buffer = eventBlocks.pop();
 
-                for (const line of lines) {
-                    // 解析SSE data: 开头的行
-                    if (line.startsWith("data:")) {
-                        const token = line.substring(5);
-                        aiDom.innerText += token;
-                        chatBox.scrollTop = chatBox.scrollHeight;
+                for(const block of eventBlocks){
+                    if(!block.trim()) continue;
+                    const lines = block.split("\n");
+                    for(const line of lines){
+                        if(!line.startsWith("data:")) continue;
+                        const raw = line.slice(5).trim();
+                        if(raw === "[DONE]") return;
+                        try {
+                            const obj = JSON.parse(raw);
+                            fullText += obj.delta;
+                            aiContentDom.innerText = fullText;
+                            scrollBottom();
+                        }catch(e){
+                            // JSON解析失败，跳过
+                        }
                     }
                 }
             }
-            // 对话完成，自动更新会话标题，取第一条用户消息
-            const targetSession = sessionList.find(s=>s.id === currentSessionId);
-            if(targetSession.title === "新对话"){
-                targetSession.title = message.substring(0,18);
-                saveSessionToLocal();
-                renderSessionList();
+        }catch(err){
+            if(err.name !== "AbortError"){
+                aiContentDom.innerText += "\n\n【请求出错】" + err.message;
             }
-        } catch (err) {
-            console.error("流异常", err);
-            appendText("\n【连接异常】");
-        } finally {
-            reader = null;
+        }finally {
+            abortController = null;
+            sendBtn.classList.remove('hidden');
+            stopBtn.classList.add('hidden');
         }
     }
 
-    // 停止生成：浏览器断开流，后端Flux自动取消
-    function stopGenerate() {
-        if (reader) {
-            reader.cancel();
-            reader = null;
-            appendText("\n【已手动终止AI输出】");
+
+
+
+
+    // 停止生成
+    function stopGenerate(){
+        if(abortController){
+            abortController.abort();
         }
     }
 
-    function appendText(text) {
-        const div = document.createElement("div");
-        div.innerText = text;
-        chatBox.appendChild(div);
-        chatBox.scrollTop = chatBox.scrollHeight;
+    // 追加消息到页面
+    function appendMessage(role, content, isTemp=false){
+        const wrap = document.createElement('div');
+        wrap.className = `msg-enter flex ${role === "USER" ? "justify-end" : "justify-start"}`;
+        const bubbleClass = role === "USER"
+            ? "bg-primary text-white rounded-xl rounded-br-none max-w-[70%] px-4 py-2.5"
+            : "bg-aiMsg text-gray-800 rounded-xl rounded-bl-none max-w-[70%] px-4 py-2.5";
+        wrap.innerHTML = `
+            <div class="msg-content whitespace-pre-wrap">${content}</div>
+        `
+        chatContainer.appendChild(wrap);
+        scrollBottom();
+        return wrap;
     }
+
+    // 滚动到底部
+    function scrollBottom(){
+        chatContainer.scrollTop = chatContainer.scrollHeight;
+    }
+
+    // 清空聊天DOM
+    function clearChatDom(){
+        chatContainer.innerHTML = "";
+    }
+
+    init();
 </script>
 </body>
 </html>
