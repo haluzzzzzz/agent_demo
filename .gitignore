@@ -35,3 +35,6 @@ build/
 
 ### RAG 向量库本地持久化文件 ###
 data/
+
+### 本地环境配置（含数据库等敏感信息，不提交） ###
+src/main/resources/application-dev.yml

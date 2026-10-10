@@ -81,7 +81,19 @@ CREATE TABLE chat_message (
 );
 ```
 
-4. 按需修改 [application.yml](src/main/resources/application.yml) 中的 MySQL 连接与模型名。
+4. 本地环境配置：仓库不包含数据库等本地配置，请自行创建 `src/main/resources/application-dev.yml`（该文件已被 `.gitignore` 忽略，不会提交），内容如下：
+
+```yaml
+spring:
+  datasource:
+    driver-class-name: com.mysql.cj.jdbc.Driver
+    username: root
+    password: your-password
+    url: jdbc:mysql://localhost:3306/chat_agent?useSSL=false&serverTimezone=UTC
+  ai:
+    ollama:
+      base-url: http://localhost:11434
+```
 
 ## 启动
 

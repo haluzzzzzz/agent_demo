@@ -1,12 +1,8 @@
 spring:
-  datasource:
-    driver-class-name: com.mysql.cj.jdbc.Driver
-    username: root
-    password:
-    url: jdbc:mysql://localhost:3306/chat_agent?useSSL=false&serverTimezone=UTC
+  profiles:
+    active: dev   # 本地环境配置在 application-dev.yml（不提交），模板见 application-dev.yml.example
   ai:
     ollama:
-      base-url: http://localhost:11434
       chat:
         enable-thinking: true
         model: qwen3.5:9b
@@ -32,25 +28,8 @@ spring:
     multipart:
       max-file-size: 20MB
       max-request-size: 20MB
-  chat:
-    memory:
-      repository:
-        redis:
-          host: localhost
-          port: 6379
-          time-to-live: 24h
-          initialize-schema: true
-          index-name: chat-memory-idx
   application:
     name: agent_demo
-data:
-  redis:
-    host: localhost
-    port: 6379
-    password:
-    database: 0
-    timeout: 10s
-    connect-timeout: 10s
 mybatis-plus:
   configuration:
     map-underscore-to-camel-case: true
