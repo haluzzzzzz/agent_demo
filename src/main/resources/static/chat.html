@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>AI助手</title>
+    <title>AI助手 - SpringAI+Ollama</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://cdn.jsdelivr.net/npm/font-awesome@4.7.0/css/font-awesome.min.css" rel="stylesheet">
     <script>
@@ -12,307 +12,358 @@
                 extend: {
                     colors: {
                         primary: '#2563eb',
-                        sidebarBg: '#111827',
-                        chatBg: '#ffffff',
-                        userMsg: '#eff6ff',
-                        aiMsg: '#f9fafb',
+                        sidebar: '#111827',
+                        chatBg: '#f7f8fa',
+                        userBubble: '#2563eb',
+                        aiBubble: '#ffffff',
+                        thinkBg: '#f3f4f6'
                     },
                     fontFamily: {
                         sans: ['Inter', 'system-ui', 'sans-serif'],
                     },
                 }
             },
-            darkMode: 'class',
+            darkMode: false
         }
     </script>
-    <style type="text/tailwindcss">
-        @layer utilities {
-            .scrollbar-hide::-webkit-scrollbar {
-                display: none;
-            }
-            .scrollbar-hide {
-                -ms-overflow-style: none;
-                scrollbar-width: none;
-            }
-            .msg-enter {
-                animation: fadeIn 0.25s ease-out;
-            }
-            @keyframes fadeIn {
-                from {opacity:0; transform: translateY(6px);}
-                to {opacity:1; transform: translateY(0);}
-            }
+    <style>
+        /* 滚动条美化 */
+        ::-webkit-scrollbar {
+            width: 6px;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #d1d5db;
+            border-radius: 4px;
+        }
+        .chat-container {
+            height: calc(100vh - 170px);
+        }
+        .think-block.streaming::after,
+        .ans-block.streaming::after {
+            content: '▍';
+            display: inline-block;
+            animation: blink 1s step-start infinite;
+            color: #9ca3af;
+        }
+        @keyframes blink {
+            50% { opacity: 0; }
         }
     </style>
 </head>
-<body class="h-screen overflow-hidden bg-gray-50 flex">
-<!-- 左侧侧边栏 -->
-<div id="sidebar" class="w-64 bg-sidebarBg text-white flex flex-col transition-all">
-    <div class="p-3">
-        <button id="newChatBtn" class="w-full py-2.5 px-4 rounded-lg border border-gray-600 hover:bg-gray-800 flex items-center gap-2 transition">
-            <i class="fa fa-plus-circle"></i>
-            <span>新建对话</span>
-        </button>
-    </div>
-    <!-- 会话列表 -->
-    <div id="sessionList" class="flex-1 overflow-y-auto scrollbar-hide px-2 py-1 space-y-1">
-        <!-- 会话项由JS动态渲染 -->
-    </div>
-    <div class="p-3 border-t border-gray-700 text-xs text-gray-400">
-        AI助手 · agent_chat
-    </div>
-</div>
+<body class="bg-gray-50 overflow-hidden">
+<div class="flex h-screen">
+    <!-- 左侧会话栏 -->
+    <aside class="w-64 bg-sidebar text-white flex flex-col">
+        <div class="p-4 border-b border-gray-700">
+            <button onclick="createNewSession()"
+                    class="w-full bg-primary hover:bg-blue-700 rounded-lg py-2 px-3 flex items-center justify-center gap-2 transition">
+                <i class="fa fa-plus"></i>新建对话
+            </button>
+        </div>
+        <div id="sessionList" class="flex-1 overflow-y-auto p-2 space-y-1">
+            <!-- 会话列表动态渲染 -->
+        </div>
+    </aside>
 
-<!-- 主聊天区域 -->
-<div class="flex-1 flex flex-col h-full">
-    <!-- 顶部标题栏 -->
-    <div class="h-14 border-b flex items-center justify-between px-5 bg-white">
-        <div class="font-medium text-gray-800">AI对话</div>
-        <div id="currentSessionName" class="text-sm text-gray-500"></div>
-    </div>
+    <!-- 主聊天区域 -->
+    <main class="flex-1 flex flex-col">
+        <!-- 头部 -->
+        <header class="h-14 border-b flex items-center px-4 bg-white">
+            <h2 class="text-lg font-medium">AI对话助手</h2>
+        </header>
 
-    <!-- 聊天内容容器 -->
-    <div id="chatContainer" class="flex-1 overflow-y-auto p-4 md:px-20 lg:px-32 space-y-6">
-        <div class="w-full h-full flex items-center justify-center text-gray-400" id="emptyTip">
-            <div class="text-center">
-                <div class="text-3xl mb-3">🤖</div>
-                <p>你好，我是你的AI助手，请输入问题开始对话</p>
+        <!-- 聊天内容 -->
+        <div id="chatBox" class="chat-container overflow-y-auto p-4 space-y-4">
+            <!-- 消息动态渲染 -->
+        </div>
+
+        <!-- 输入区域 -->
+        <div class="border-t bg-white p-4">
+            <div class="max-w-4xl mx-auto">
+                <textarea id="input"
+                          class="w-full border rounded-lg p-3 resize-none h-24 focus:outline-none focus:ring-2 focus:ring-blue-300"
+                          placeholder="请输入消息，Shift+Enter换行，Enter发送"></textarea>
+                <div class="flex justify-end items-center mt-2">
+                    <div class="flex gap-2">
+                        <button onclick="stopStream()" class="px-4 py-2 rounded-lg border hover:bg-gray-100">停止生成</button>
+                        <button onclick="sendMessage()" class="px-4 py-2 bg-primary text-white rounded-lg hover:bg-blue-700">发送</button>
+                    </div>
+                </div>
             </div>
         </div>
-    </div>
-
-    <!-- 底部输入区域 -->
-    <div class="p-4 md:px-20 lg:px-32 border-t bg-white">
-        <div class="relative">
-                <textarea id="msgInput"
-                          class="w-full border border-gray-200 rounded-xl p-3 pr-20 resize-none outline-none focus:border-primary transition"
-                          rows="2"
-                          placeholder="输入消息，Shift+Enter换行"></textarea>
-            <div class="absolute right-2 bottom-2 flex gap-1">
-                <button id="stopBtn" class="hidden px-3 py-1.5 rounded-lg bg-gray-200 hover:bg-gray-300 text-sm">
-                    <i class="fa fa-stop"></i> 停止
-                </button>
-                <button id="sendBtn" class="px-3 py-1.5 rounded-lg bg-primary hover:bg-blue-700 text-white text-sm">
-                    <i class="fa fa-paper-plane"></i> 发送
-                </button>
-            </div>
-        </div>
-    </div>
+    </main>
 </div>
 
 <script>
-    // =========全局变量=========
-    let currentSessionId = null;
-    let abortController = null; // 用于中断流式请求
-    let sessionList = [];
-    const API_BASE = "http://localhost:8080/api/chat";
-
     // DOM元素
-    const chatContainer = document.getElementById('chatContainer');
-    const msgInput = document.getElementById('msgInput');
-    const sendBtn = document.getElementById('sendBtn');
-    const stopBtn = document.getElementById('stopBtn');
-    const newChatBtn = document.getElementById('newChatBtn');
-    const sessionListDom = document.getElementById('sessionList');
-    const emptyTip = document.getElementById('emptyTip');
+    const inputEl = document.getElementById("input");
+    const chatBox = document.getElementById("chatBox");
+    const sessionListEl = document.getElementById("sessionList");
 
-    // 初始化
-    async function init(){
-        // 页面加载，从后端拉取全部会话
-        await loadAllSessions();
-        const lastSessionId = localStorage.getItem("ai_chat_current_session");
-        if(lastSessionId && sessionList.includes(lastSessionId)){
-            await switchSession(lastSessionId);
-        }else{
+    // 当前会话
+    let currentSessionId = null;
+    let abortController = null; // 终止fetch流式请求
+    const SESSION_STORAGE_KEY = "agent_chat_sessions";
+    const THINK_PREVIEW_LEN = 60; // 折叠预览：最多展示开头60字符
+
+    // 页面加载初始化
+    window.onload = () => {
+        loadSessionsFromLocal();
+        if (!currentSessionId) {
             createNewSession();
         }
-
-        newChatBtn.onclick = createNewSession;
-        sendBtn.onclick = sendMessage;
-        stopBtn.onclick = stopGenerate;
-        msgInput.addEventListener('keydown', (e)=>{
-            if(e.key === 'Enter' && !e.shiftKey){
-                e.preventDefault();
-                sendMessage();
-            }
-        })
     }
 
-    // 从后端拉取全部会话列表
-    async function loadAllSessions(){
-        const res = await fetch(`${API_BASE}/sessions`);
-        sessionList = await res.json();
+    // 新建会话
+    function createNewSession() {
+        const sessionId = crypto.randomUUID();
+        currentSessionId = sessionId;
+        saveSessionToLocal(sessionId, "新对话");
+        renderSessionList();
+        chatBox.innerHTML = "";
+    }
+
+    // 本地存储会话列表
+    function getLocalSessions() {
+        const data = localStorage.getItem(SESSION_STORAGE_KEY);
+        return data ? JSON.parse(data) : {};
+    }
+
+    function saveSessionToLocal(sessionId, title) {
+        const sessions = getLocalSessions();
+        sessions[sessionId] = {
+            title: title,
+            createTime: new Date().toLocaleString()
+        }
+        localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(sessions));
+    }
+
+    function deleteSessionLocal(sessionId) {
+        const sessions = getLocalSessions();
+        delete sessions[sessionId];
+        localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(sessions));
+        if (currentSessionId === sessionId) {
+            createNewSession();
+        }
+        renderSessionList();
+        chatBox.innerHTML = "";
+    }
+
+    function loadSessionsFromLocal() {
+        const sessions = getLocalSessions();
+        const keys = Object.keys(sessions);
+        if (keys.length > 0) {
+            currentSessionId = keys[0];
+        }
         renderSessionList();
     }
-
-    // 创建新会话
-    async function createNewSession(){
-        const sid = crypto.randomUUID();
-        currentSessionId = sid;
-        localStorage.setItem("ai_chat_current_session", sid);
-
-        // ✅【关键1】前端数组追加新会话
-        sessionList.push(sid);
-
-        // ✅【关键2】通知后端创建会话（后端把sid存入内存）
-        await fetch(`${API_BASE}/createSession`, {
-            method:"POST",
-            headers:{"Content-Type":"application/json"},
-            body: JSON.stringify({sessionId: sid})
-        });
-
-        clearChatDom();
-        emptyTip.style.display = "flex";
-        renderSessionList(); // 现在sessionList里面已经有sid，可以渲染出来
-    }
-
 
     // 渲染左侧会话列表
-    function renderSessionList(){
-        sessionListDom.innerHTML = "";
-        sessionList.forEach(sid=>{
-            const item = document.createElement('div');
-            item.className = `flex items-center justify-between px-2 py-1.5 rounded cursor-pointer group ${sid === currentSessionId ? 'bg-gray-700' : 'hover:bg-gray-800'}`;
-            item.innerHTML = `
-                <span class="text-sm truncate flex-1" title="${sid}">对话-${sid.substring(0,8)}</span>
-                <button class="text-gray-400 hover:text-red-400 opacity-0 group-hover:opacity-100 transition" onclick="event.stopPropagation(); deleteSession('${sid}')">
-                    <i class="fa fa-trash-o"></i>
-                </button>
+    function renderSessionList() {
+        const sessions = getLocalSessions();
+        sessionListEl.innerHTML = "";
+        Object.keys(sessions).forEach(id => {
+            const item = sessions[id];
+            const div = document.createElement("div");
+            div.className = `flex justify-between items-center p-2 rounded cursor-pointer ${currentSessionId === id ? 'bg-gray-700' : 'hover:bg-gray-800'}`;
+            div.innerHTML = `
+                <span class="truncate text-sm">${item.title}</span>
+                <i class="fa fa-times text-gray-400 hover:text-red-400" onclick="event.stopPropagation();deleteSessionLocal('${id}')"></i>
             `;
-            item.onclick = ()=> switchSession(sid);
-            sessionListDom.appendChild(item);
+            div.onclick = () => {
+                currentSessionId = id;
+                renderSessionList();
+                loadHistoryMsg(id);
+            }
+            sessionListEl.appendChild(div);
         })
     }
 
-    // 切换会话
-    async function switchSession(sid){
-        currentSessionId = sid;
-        localStorage.setItem("ai_chat_current_session", sid);
-        renderSessionList();
-        clearChatDom();
-        emptyTip.style.display = "none";
-        const res = await fetch(`${API_BASE}/history?sessionId=${sid}`);
-        const history = await res.json();
-        history.forEach(item=>{
-            appendMessage(item.role, item.content);
-        })
-    }
-
-    // 删除会话
-    async function deleteSession(sid){
-        if(!confirm("确定删除该对话？")) return;
-        await fetch(`${API_BASE}/history?sessionId=${sid}`, {
-            method:"DELETE"
-        })
-        await loadAllSessions();
-        if(currentSessionId === sid){
-            createNewSession();
+    // 加载历史消息（后端接口）
+    async function loadHistoryMsg(sessionId) {
+        try {
+            const resp = await fetch(`/api/chat/history?sessionId=${sessionId}`);
+            const msgs = await resp.json();
+            chatBox.innerHTML = "";
+            msgs.forEach(msg => {
+                if (msg.role === "USER") {
+                    addUserMsg(msg.content);
+                } else if (msg.role === "ASSISTANT") {
+                    addAiMsg(msg.content, false);
+                }
+            })
+        } catch (e) {
+            console.error("加载历史失败", e);
+            chatBox.innerHTML = "";
         }
     }
 
-    async function sendMessage(){
-        const content = msgInput.value.trim();
-        if(!content || abortController) return;
-        msgInput.value = "";
-        emptyTip.style.display = "none";
+    // 渲染用户消息气泡
+    function addUserMsg(text) {
+        const div = document.createElement("div");
+        div.className = "flex justify-end";
+        div.innerHTML = `
+            <div class="bg-userBubble text-white px-4 py-2 rounded-xl max-w-2xl whitespace-pre-wrap">${escapeHtml(text)}</div>
+        `
+        chatBox.appendChild(div);
+        chatBox.scrollTop = chatBox.scrollHeight;
+    }
 
-        appendMessage("USER", content);
-        const aiWrapper = appendMessage("ASSISTANT", "", true);
-        const aiContentDom = aiWrapper.querySelector(".msg-content");
+    // 渲染AI消息气泡
+    function addAiMsg(text, isStreaming = true) {
+        const wrapper = document.createElement("div");
+        wrapper.className = "flex justify-start";
+        wrapper.innerHTML = `
+        <div class="bg-aiBubble border rounded-xl p-4 max-w-2xl">
+            <!-- 思考标题栏：折叠时展示开头预览文字 -->
+            <div class="think-header flex items-center cursor-pointer text-sm text-gray-500 mb-2" onclick="toggleThink(this)">
+                <i class="fa fa-caret-right mr-1 transition-transform duration-200"></i>
+                <span>思考过程：</span>
+                <span class="think-preview text-gray-400 italic"></span>
+            </div>
+            <!-- 完整思考面板，默认隐藏 -->
+            <div class="think-block bg-thinkBg p-2 rounded mb-3 text-sm text-gray-400 whitespace-pre-wrap hidden"></div>
+            <div class="ans-block whitespace-pre-wrap"></div>
+        </div>
+        `
+        chatBox.appendChild(wrapper);
+        chatBox.scrollTop = chatBox.scrollHeight;
+        return {
+            thinkPreview: wrapper.querySelector(".think-preview"),
+            thinkBlock: wrapper.querySelector(".think-block"),
+            ansDom: wrapper.querySelector(".ans-block"),
+            thinkHeader: wrapper.querySelector(".think-header"),
+            fullThinkText: "" // 保存本条完整思考文本
+        }
+    }
 
-        sendBtn.classList.add('hidden');
-        stopBtn.classList.remove('hidden');
+    // 切换单个思考面板展开/收起
+    function toggleThink(headerEl) {
+        const icon = headerEl.querySelector("i");
+        const previewSpan = headerEl.querySelector(".think-preview");
+        const thinkBlock = headerEl.nextElementSibling;
+        const fullText = thinkBlock.dataset.fulltext || "";
+
+        if (thinkBlock.classList.contains("hidden")) {
+            // 展开：显示全部思考，预览文字隐藏
+            thinkBlock.classList.remove("hidden");
+            icon.classList.remove("fa-caret-right");
+            icon.classList.add("fa-caret-down");
+            thinkBlock.innerText = fullText;
+            thinkBlock.scrollTop = thinkBlock.scrollHeight;
+            previewSpan.style.display = "none";
+        } else {
+            // 折叠：隐藏完整面板，截取【开头】字符展示预览
+            thinkBlock.classList.add("hidden");
+            icon.classList.remove("fa-caret-down");
+            icon.classList.add("fa-caret-right");
+            previewSpan.style.display = "inline";
+            if(fullText.length > THINK_PREVIEW_LEN){
+                previewSpan.innerText = fullText.slice(0, THINK_PREVIEW_LEN) + "……";
+            }else{
+                previewSpan.innerText = fullText;
+            }
+        }
+    }
+
+    async function sendMessage() {
+        const content = inputEl.value.trim();
+        if (!content || !currentSessionId) return;
+        addUserMsg(content);
+        inputEl.value = "";
+
+        const msgItem = addAiMsg("", true);
+        msgItem.thinkBlock.classList.add("streaming");
+        msgItem.ansDom.classList.add("streaming");
         abortController = new AbortController();
 
         try {
-            const resp = await fetch(`${API_BASE}/stream`, {
-                method:"POST",
-                headers:{
-                    "Content-Type":"application/json"
-                },
-                body: JSON.stringify({
-                    sessionId: currentSessionId,
-                    content: content
-                }),
+            const res = await fetch("/api/chat/stream", {
+                method: "POST",
+                headers: {"Content-Type": "application/json"},
+                body: JSON.stringify({sessionId: currentSessionId, content: content}),
                 signal: abortController.signal
-            });
-            const reader = resp.body.getReader();
+            })
+            const reader = res.body.getReader();
             const decoder = new TextDecoder();
             let buffer = "";
-            let fullText = "";
+            let eventName = "";
 
-            while(true){
+            while (true) {
                 const {done, value} = await reader.read();
-                if(done) break;
-                buffer += decoder.decode(value, {stream:true});
-                const eventBlocks = buffer.split("\n\n");
-                buffer = eventBlocks.pop();
+                if (done) break;
+                buffer += decoder.decode(value, {stream: true});
+                const lines = buffer.split("\n");
+                buffer = lines.pop();
 
-                for(const block of eventBlocks){
-                    if(!block.trim()) continue;
-                    const lines = block.split("\n");
-                    for(const line of lines){
-                        if(!line.startsWith("data:")) continue;
-                        const raw = line.slice(5).trim();
-                        if(raw === "[DONE]") return;
-                        try {
-                            const obj = JSON.parse(raw);
-                            fullText += obj.delta;
-                            aiContentDom.innerText = fullText;
-                            scrollBottom();
-                        }catch(e){
-                            // JSON解析失败，跳过
+                for (const line of lines) {
+                    if (line.startsWith("event:")) {
+                        eventName = line.replace("event:", "").trim();
+                    } else if (line.startsWith("data:")) {
+                        const dataStr = line.slice(5);
+                        if (eventName === "thinking") {
+                            // 持续拼接完整思考文本
+                            msgItem.fullThinkText += dataStr;
+                            msgItem.thinkBlock.dataset.fulltext = msgItem.fullThinkText;
+
+                            if(msgItem.thinkBlock.classList.contains("hidden")){
+                                // ✅ 折叠：截取开头N个字符 + 省略号
+                                let preview = msgItem.fullThinkText;
+                                if(preview.length > THINK_PREVIEW_LEN){
+                                    preview = preview.slice(0, THINK_PREVIEW_LEN) + "……";
+                                }
+                                msgItem.thinkPreview.innerText = preview;
+                            }else{
+                                // 展开状态：渲染全部文本
+                                msgItem.thinkBlock.innerText = msgItem.fullThinkText;
+                                msgItem.thinkBlock.scrollTop = msgItem.thinkBlock.scrollHeight;
+                            }
+                        } else if (eventName === "answer") {
+                            msgItem.ansDom.innerText += dataStr;
+                            const sessions = getLocalSessions();
+                            if (sessions[currentSessionId].title === "新对话") {
+                                const title = msgItem.ansDom.innerText.substring(0, 18);
+                                saveSessionToLocal(currentSessionId, title);
+                                renderSessionList();
+                            }
                         }
+                    } else if (line === "") {
+                        eventName = "";
                     }
                 }
+                chatBox.scrollTop = chatBox.scrollHeight;
             }
-        }catch(err){
-            if(err.name !== "AbortError"){
-                aiContentDom.innerText += "\n\n【请求出错】" + err.message;
+        } catch (err) {
+            if (err.name !== "AbortError") {
+                msgItem.ansDom.innerText += "\n【请求中断】";
+                console.error(err);
             }
-        }finally {
-            abortController = null;
-            sendBtn.classList.remove('hidden');
-            stopBtn.classList.add('hidden');
         }
+
+        msgItem.thinkBlock.classList.remove("streaming");
+        msgItem.ansDom.classList.remove("streaming");
+        abortController = null;
     }
 
-
-
-
-
-    // 停止生成
-    function stopGenerate(){
-        if(abortController){
+    // 停止流式输出
+    function stopStream() {
+        if (abortController) {
             abortController.abort();
         }
     }
 
-    // 追加消息到页面
-    function appendMessage(role, content, isTemp=false){
-        const wrap = document.createElement('div');
-        wrap.className = `msg-enter flex ${role === "USER" ? "justify-end" : "justify-start"}`;
-        const bubbleClass = role === "USER"
-            ? "bg-primary text-white rounded-xl rounded-br-none max-w-[70%] px-4 py-2.5"
-            : "bg-aiMsg text-gray-800 rounded-xl rounded-bl-none max-w-[70%] px-4 py-2.5";
-        wrap.innerHTML = `
-            <div class="msg-content whitespace-pre-wrap">${content}</div>
-        `
-        chatContainer.appendChild(wrap);
-        scrollBottom();
-        return wrap;
+    // html转义防止XSS
+    function escapeHtml(str) {
+        return str.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#039;");
     }
 
-    // 滚动到底部
-    function scrollBottom(){
-        chatContainer.scrollTop = chatContainer.scrollHeight;
-    }
-
-    // 清空聊天DOM
-    function clearChatDom(){
-        chatContainer.innerHTML = "";
-    }
-
-    init();
+    // Enter发送，Shift+Enter换行
+    inputEl.addEventListener("keydown", function (e) {
+        if (e.key === "Enter" && !e.shiftKey) {
+            e.preventDefault();
+            sendMessage();
+        }
+    })
 </script>
 </body>
 </html>

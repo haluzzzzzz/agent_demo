@@ -14,6 +14,7 @@ import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
+import reactor.core.Disposable;
 import reactor.core.publisher.Flux;
 
 import java.io.IOException;
@@ -38,37 +39,38 @@ public class ChatController {
 
     @PostMapping(value = "/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public SseEmitter streamChat(@RequestBody ChatMessageDTO dto) {
-        log.info("收到SSE请求 sessionId={}, content={}", dto.getSessionId(), dto.getContent());
-        SseEmitter sseEmitter = new SseEmitter(30_000L);
-        Flux<String> tokenFlux = chatService.streamChat(dto.getContent(), dto.getSessionId());
+        SseEmitter sseEmitter = new SseEmitter(0L);
+        Flux<ChatApp.ChatChunk> chunkFlux = chatApp.streamChatWithThinkingRaw(dto.getContent(), dto.getSessionId());
 
-        tokenFlux.subscribe(
-                token -> {
+        Disposable subscription = chunkFlux.subscribe(
+                chunk -> {
                     try {
-                        String escapedToken = token.replace("\"", "\\\"");
-                        String jsonPayload = "{\"delta\":\"" + escapedToken + "\"}";
-                        log.info("SSE推送：{}", jsonPayload);
-                        sseEmitter.send(SseEmitter.event().data(jsonPayload));
+                        sseEmitter.send(SseEmitter.event().name(chunk.type()).data(chunk.content()));
                     } catch (IOException e) {
-                        log.error("SSE发送异常", e);
                         sseEmitter.completeWithError(e);
                     }
                 },
-                error -> {
-                    log.error("Flux订阅异常", error);
-                    sseEmitter.completeWithError(error);
-                },
+                error -> sseEmitter.completeWithError(error),
                 () -> {
                     try {
-                        log.info("推送结束标记 [DONE]");
-                        sseEmitter.send(SseEmitter.event().data("[DONE]"));
+                        sseEmitter.send(SseEmitter.event().name("end").data("[DONE]"));
                     } catch (IOException ignored) {}
                     sseEmitter.complete();
-                    log.info("SSE连接关闭");
                 }
         );
+
+        // 客户端断开（前端abort、超时、异常）时，取消底层Flux订阅，
+        // 避免Ollama继续生成浪费资源
+        sseEmitter.onCompletion(subscription::dispose);
+        sseEmitter.onTimeout(() -> {
+            subscription.dispose();
+            sseEmitter.complete();
+        });
+        sseEmitter.onError(e -> subscription.dispose());
+
         return sseEmitter;
     }
+
 
     // 获取会话历史消息
     @GetMapping("/history")
@@ -81,6 +83,8 @@ public class ChatController {
             return map;
         }).toList();
     }
+
+
 
     // 删除整个会话，清空sessionId对应的全部历史消息
     @DeleteMapping("/history")
