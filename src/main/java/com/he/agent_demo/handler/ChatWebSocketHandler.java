@@ -30,7 +30,7 @@ public class ChatWebSocketHandler extends TextWebSocketHandler {
             String sessionId = chatMessageDTO.getSessionId();
             String content = chatMessageDTO.getContent();
 
-            chatApp.streamChat(sessionId, content)
+            chatApp.streamChat(content, sessionId)
                     .doOnNext(token -> {
                         try {
                             session.sendMessage(new TextMessage(token));
