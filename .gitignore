@@ -32,3 +32,6 @@ build/
 
 ### VS Code ###
 .vscode/
+
+### RAG 向量库本地持久化文件 ###
+data/

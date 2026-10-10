@@ -10,6 +10,28 @@ spring:
       chat:
         enable-thinking: true
         model: qwen3.5:9b
+      embedding:
+        options:
+          model: nomic-embed-text   # RAG 向量模型，需 ollama pull nomic-embed-text
+    mcp:
+      server:
+        name: agent-demo-mcp-server
+        version: 1.0.0
+        type: SYNC
+        enabled: true               # SSE 地址：http://localhost:8080/api/sse
+      client:
+        enabled: false              # 接入外部 MCP 服务时打开
+        # type: SYNC
+        # toolcallback:
+        #   enabled: true
+        # sse:
+        #   connections:
+        #     agent-demo:            # 示例：接入本应用自己暴露的 MCP Server
+        #       url: http://localhost:8080
+  servlet:
+    multipart:
+      max-file-size: 20MB
+      max-request-size: 20MB
   chat:
     memory:
       repository:
@@ -58,3 +80,7 @@ knife4j:
 logging:
   level:
     org.springframework.ai.chat.client.advisor.SimpleLoggerAdvisor: debug
+
+agent:
+  vision-model: qwen2.5vl:7b        # 多模态图片理解模型，需 ollama pull qwen2.5vl:7b
+  vector-store-path: data/vectorstore.json

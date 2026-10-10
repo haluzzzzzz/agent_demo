@@ -17,7 +17,7 @@
 
     <properties>
         <java.version>21</java.version>
-        <spring.ai.version>1.1.0-RC1</spring.ai.version>
+        <spring.ai.version>1.1.0</spring.ai.version>
     </properties>
 
     <dependencyManagement>
@@ -57,6 +57,33 @@
         <dependency>
             <groupId>org.springframework.ai</groupId>
             <artifactId>spring-ai-rag</artifactId>
+        </dependency>
+
+        <!-- RAG：向量存储（含 SimpleVectorStore） -->
+        <dependency>
+            <groupId>org.springframework.ai</groupId>
+            <artifactId>spring-ai-vector-store</artifactId>
+        </dependency>
+        <!-- RAG：基于向量库的检索问答 Advisor -->
+        <dependency>
+            <groupId>org.springframework.ai</groupId>
+            <artifactId>spring-ai-advisors-vector-store</artifactId>
+        </dependency>
+        <!-- RAG：Tika 文档读取，支持 txt/md/pdf/docx 等 -->
+        <dependency>
+            <groupId>org.springframework.ai</groupId>
+            <artifactId>spring-ai-tika-document-reader</artifactId>
+        </dependency>
+
+        <!-- MCP 服务端：以 SSE 方式对外暴露工具 -->
+        <dependency>
+            <groupId>org.springframework.ai</groupId>
+            <artifactId>spring-ai-starter-mcp-server-webmvc</artifactId>
+        </dependency>
+        <!-- MCP 客户端：接入外部 MCP 服务，默认关闭，见 application.yml -->
+        <dependency>
+            <groupId>org.springframework.ai</groupId>
+            <artifactId>spring-ai-starter-mcp-client</artifactId>
         </dependency>
 
         <dependency>
